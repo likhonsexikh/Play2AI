@@ -1,0 +1,26 @@
+FROM python:3.11-slim
+
+# Install system dependencies including ADB
+RUN apt-get update && apt-get install -y \
+    android-tools-adb \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install DroidMind and dependencies
+RUN pip install --no-cache-dir \
+    'git+https://github.com/hyperb1iss/droidmind.git' \
+    anthropic \
+    openai \
+    requests \
+    websockets
+
+WORKDIR /app
+
+# Create MCP server wrapper
+COPY scripts/mcp_server.py /app/mcp_server.py
+
+EXPOSE 8081
+
+CMD ["python", "/app/mcp_server.py"]

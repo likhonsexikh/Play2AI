@@ -1,0 +1,47 @@
+FROM python:3.11-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    android-tools-adb \
+    android-tools-fastboot \
+    scrcpy \
+    ffmpeg \
+    imagemagick \
+    curl \
+    git \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+# Install additional AI and automation tools
+RUN pip install --no-cache-dir \
+    anthropic \
+    openai \
+    google-generativeai \
+    opencv-python \
+    pillow \
+    numpy \
+    requests \
+    websockets \
+    aiohttp \
+    playwright \
+    selenium \
+    uiautomator2 \
+    'git+https://github.com/hyperb1iss/droidmind.git'
+
+# Create app directory
+WORKDIR /app
+
+# Copy application code
+COPY src/ /app/src/
+COPY tools/ /app/tools/
+
+# Set permissions
+RUN chmod +x /app/src/main.py
+
+EXPOSE 8080 5555
+
+CMD ["python", "/app/src/main.py"]

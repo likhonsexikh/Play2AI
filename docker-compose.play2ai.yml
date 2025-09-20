@@ -1,0 +1,120 @@
+version: '3.8'
+
+services:
+  # AI Agent Runtime (Enhanced Play2AI agent)
+  play2ai-agent:
+    build:
+      context: ./agent
+      dockerfile: Dockerfile.enhanced
+    container_name: play2ai-agent
+    ports:
+      - "8080:8080"
+      - "5555:5555"  # ADB port
+    environment:
+      - AI_MODEL=${AI_MODEL}
+      - TASK_MODE=${TASK_MODE}
+      - ANDROID_EMULATOR_HOST=android-emulator
+      - ANDROID_EMULATOR_PORT=5554
+      - MCP_SERVER_URL=http://android-mcp:8081
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPOSITORY=${GITHUB_REPOSITORY}
+      - DISPLAY=:99
+    volumes:
+      - .:/workspace:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - android-data:/android-data:rw
+      - screenshots:/screenshots:rw
+    networks:
+      - play2ai-network
+    depends_on:
+      - android-emulator
+      - android-mcp
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+
+  # Android Emulator with enhanced capabilities
+  android-emulator:
+    image: us-docker.pkg.dev/android-emulator-268719/images/30-google-x64:30.1.2
+    container_name: android-emulator
+    ports:
+      - "5554:5554"  # Emulator console
+      - "5555:5555"  # ADB
+      - "8554:8554"  # Web interface
+    environment:
+      - ADBKEY="$(cat ~/.android/adbkey)"
+      - EMULATOR_PARAMS=-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+      - ANDROID_ARCH=x86_64
+      - ANDROID_API_LEVEL=${ANDROID_VERSION}
+    volumes:
+      - android-data:/android-data:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    networks:
+      - play2ai-network
+    privileged: true
+    devices:
+      - /dev/kvm:/dev/kvm
+    healthcheck:
+      test: ["CMD", "adb", "shell", "getprop", "sys.boot_completed"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+  # Android MCP Server (DroidMind integration)
+  android-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    container_name: android-mcp
+    ports:
+      - "8081:8081"
+    environment:
+      - MCP_SERVER_PORT=8081
+      - ANDROID_EMULATOR_HOST=android-emulator
+      - ANDROID_EMULATOR_PORT=5554
+      - ADB_SERVER_SOCKET=tcp:android-emulator:5037
+    volumes:
+      - .:/workspace:rw
+      - android-data:/android-data:rw
+      - screenshots:/screenshots:rw
+    networks:
+      - play2ai-network
+    depends_on:
+      android-emulator:
+        condition: service_healthy
+    command: >
+      sh -c "
+        pip install --no-cache-dir 'git+https://github.com/hyperb1iss/droidmind.git' &&
+        python -m droidmind --transport stdio
+      "
+
+  # Task Monitor and Logger
+  task-monitor:
+    image: python:3.11-slim
+    container_name: task-monitor
+    environment:
+      - AGENT_URL=http://play2ai-agent:8080
+      - MCP_URL=http://android-mcp:8081
+    volumes:
+      - .:/workspace:rw
+      - screenshots:/screenshots:rw
+      - logs:/logs:rw
+    networks:
+      - play2ai-network
+    depends_on:
+      - play2ai-agent
+    command: >
+      sh -c "
+        pip install --no-cache-dir requests pillow &&
+        python /workspace/scripts/task_monitor.py
+      "
+
+networks:
+  play2ai-network:
+    driver: bridge
+
+volumes:
+  android-data:
+  screenshots:
+  logs:
