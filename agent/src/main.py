@@ -45,6 +45,7 @@ def parse_todo(todo_fp: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--todo", required=True, help="Path to todo.md")
+    parser.add_argument("--apk-path", required=True, help="Path to the sample APK to install.")
     args = parser.parse_args()
 
     if not wait_for_device():
@@ -60,9 +61,8 @@ def main():
     os.makedirs(screenshots_dir, exist_ok=True)
 
     # Task 1: Install calculator
-    # TODO: The path below is a placeholder.
-    # You need to mount a sample APK into the container and provide the correct path here.
-    install_app("/path/to/sample_calculator.apk")  # need to include sample apk
+    print(f"Installing APK from: {args.apk_path}")
+    install_app(args.apk_path)
     time.sleep(5)
     # Task 2: Open calculator
     open_app("com.android.calculator2", "com.android.calculator2.Calculator")
