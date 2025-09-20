@@ -1,36 +1,31 @@
 version: '3.8'
 
 services:
-  agent:
-    build:
-      context: ./agent
+  emulator:
+    image: waydroid/waydroid:latest
+    privileged: true
+    devices:
+      - /dev/kvm
+      - /dev/binder
+    environment:
+      - ANDROID_DISPLAY=:0
     volumes:
-      - ./output:/app/output
-      # This volume is for the agent to access the emulator's ADB socket
-      # It assumes the emulator service exposes ADB on a standard port or via a shared volume.
-      # For now, we'll assume a local ADB server is running for simplicity in early stages.
+      - ./android-data:/data
+    # If using GPU passthrough or special hardware, add below
+    # devices:
+    #   - /dev/dri/card0
+
+  agent:
+    build: ./agent
     depends_on:
       - emulator
+    volumes:
+      - ./todo.md:/app/todo.md
+      - ./agent_data:/app/data
+      - ./android-data:/android  # if needed to share emulator files
     environment:
-      - ADB_SERVER_SOCKET=/var/run/adb.sock # Example, might need adjustment
-
-  emulator:
-    # --------------------------------------------------------------------------
-    # 🚨 Emulator Configuration Required 🚨
-    # --------------------------------------------------------------------------
-    # You need to choose and configure an Android emulator service.
-    # Waydroid is recommended for performance but requires a specific host setup.
-    #
-    # Example using a pre-built Waydroid image (hypothetical):
-    # image: some/waydroid-image
-    # privileged: true
-    # volumes:
-    #   - /var/run/dbus:/var/run/dbus
-    #   - /dev/ashmem:/dev/ashmem
-    #   - /dev/binder:/dev/binder
-    #   - /dev/dri:/dev/dri # For GPU acceleration
-    # ports:
-    #   - "5555:5555" # ADB port
-    # --------------------------------------------------------------------------
-    image: busybox # Placeholder image
-    command: ["echo", "Emulator service needs to be configured. See comments in docker-compose.yml"]
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - MODEL=your_model_here
+    # optional ports if exposing UI/endpoint
+    ports:
+      - "5000:5000"

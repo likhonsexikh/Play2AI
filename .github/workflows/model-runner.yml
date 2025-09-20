@@ -1,35 +1,55 @@
-name: '🤖 AI Model Runner'
+name: Model Runner
 
 on:
-  workflow_dispatch: # Allows manual triggering
-  pull_request:
+  push:
     paths:
       - 'todo.md'
+      - 'agent/**'
+      - '.github/workflows/model-runner.yml'
 
 jobs:
-  run-agent:
+  run-tasks:
     runs-on: ubuntu-latest
+    services:
+      docker:
+        # ensure docker is available
+        name: docker
     steps:
-      - name: 'Checkout Code'
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: 'Set up Docker Buildx'
-        uses: docker/setup-buildx-action@v3
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
 
-      - name: 'Build and Run Docker Services'
+      - name: Log in to Docker registry (if needed)
+        # uses: docker/login-action@v2
+        # with credentials
+
+      - name: Build and start services
+        run: docker-compose up --build -d
+
+      - name: Wait for emulator to be ready
         run: |
-          # Note: The emulator service is a placeholder.
-          # This workflow will fail until a working emulator is configured.
-          # For now, we can build and run the agent to test its logic.
-          docker-compose build agent
-          # In a real scenario, you'd run 'docker-compose up -d'
-          # and then exec into the agent container to run tasks.
-          # For this example, we'll just run the agent's main script.
-          docker-compose run --rm agent
+          # simple polling, adjust as needed
+          until docker exec $(docker ps -qf "name=Play2AI_emulator_1") adb devices; do
+            sleep 5
+          done
 
-      - name: 'Upload Results'
-        if: always() # Run even if previous steps fail
-        uses: actions/upload-artifact@v4
+      - name: Run agent tasks
+        run: docker exec $(docker ps -qf "name=Play2AI_agent_1") python /app/src/main.py --todo /app/todo.md
+
+      - name: Collect artifacts
+        run: |
+          docker cp $(docker ps -qf "name=Play2AI_agent_1"):/app/logs logs || true
+          docker cp $(docker ps -qf "name=Play2AI_emulator_1"):/data/screenshots screenshots || true
+        continue-on-error: true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
         with:
-          name: agent-output
-          path: output/
+          name: run-results
+          path: |
+            logs
+            screenshots
+
+      - name: Shut down
+        run: docker-compose down

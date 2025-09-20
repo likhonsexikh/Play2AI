@@ -1,19 +1,11 @@
-# ✅ To-Do List
+# 📝 Tasks for Agent (First Iteration)
 
-## 🚀 Milestone 1: Basic Setup & Sanity Check
+For the next run, the agent should complete the following tasks in order:
 
-- [ ] **Task 1: Verify Emulator Access**
-  - **Goal:** Confirm the agent can communicate with the Android emulator.
-  - **Steps:**
-    1. Run `adb devices` to list connected devices.
-    2. Capture the screen using `adb screencap`.
-    3. Save the screenshot to `output/screenshot.png`.
-  - **Success:** The agent successfully executes ADB commands and saves a screenshot.
-
-- [ ] **Task 2: Install an App**
-  - **Goal:** Install a simple APK on the emulator.
-  - **Steps:**
-    1. Download a small, open-source APK (e.g., a simple calculator app).
-    2. Use `adb install <path_to_apk>` to install it.
-    3. Verify the app is listed in `adb shell pm list packages`.
-  - **Success:** The app is successfully installed on the emulator.
+1. Install a sample Android app (e.g. Calculator APK) on the emulator
+2. Open the app
+3. Perform a simple interaction (e.g. press a button in the app)
+4. Capture a screenshot after interaction
+5. Save the screenshot to a shared folder `/android/screenshots`
+6. Generate a short text summary describing whether the interaction succeeded, based on the screenshot
+7. Log all steps in `/app/logs/run1.log`

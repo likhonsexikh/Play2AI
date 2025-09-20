@@ -1,10 +1,17 @@
-FROM python:3.9-slim
+FROM python:3.11-slim
 
-# Install ADB
-RUN apt-get update && apt-get install -y --no-install-recommends android-tools-adb && \
-    rm -rf /var/lib/apt/lists/*
+# install dependencies
+RUN apt-get update && apt-get install -y \
+    adb \
+    libgl1-mesa-dev \
+    # other dependencies (scrcpy if needed) \
+    && apt-get clean
 
 WORKDIR /app
-COPY . .
 
-CMD ["python", "main.py"]
+COPY ./src /app/src
+COPY requirements.txt /app/requirements.txt
+
+RUN pip install --no-cache-dir -r /app/requirements.txt
+
+CMD ["python", "/app/src/main.py", "--todo", "/app/todo.md"]
