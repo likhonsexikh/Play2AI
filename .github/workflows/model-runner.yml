@@ -10,6 +10,8 @@ on:
 jobs:
   run-tasks:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     services:
       docker:
         # ensure docker is available
