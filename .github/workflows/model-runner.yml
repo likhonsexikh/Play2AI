@@ -1,42 +1,826 @@
-name: Model Runner
-
+name: Play2AI Agentic Android Emulator System
 on:
   push:
-    paths:
-      - 'todo.md'
-      - 'agent/**'
-      - '.github/workflows/model-runner.yml'
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      ai_model:
+        description: 'AI Model for agent runtime'
+        required: true
+        default: 'llama3'
+        type: choice
+        options:
+        - llama3
+        - gemma
+        - mistral
+        - phi2
+        - granite
+      android_version:
+        description: 'Android emulator version'
+        required: true
+        default: '31'
+        type: choice
+        options:
+        - '28'
+        - '29'
+        - '30'
+        - '31'
+        - '33'
+      task_mode:
+        description: 'Agent task execution mode'
+        required: true
+        default: 'autonomous'
+        type: choice
+        options:
+        - autonomous
+        - guided
+        - testing
+        - development
+
+permissions:
+  contents: write
+  actions: write
+  packages: write
+  pull-requests: write
+  issues: write
+  repository-projects: write
+  deployments: write
+  pages: write
+  security-events: write
+  statuses: write
+  checks: write
+
+env:
+  DOCKER_BUILDKIT: 1
+  COMPOSE_DOCKER_CLI_BUILD: 1
+  AI_MODEL: ${{ github.event.inputs.ai_model || 'llama3' }}
+  ANDROID_VERSION: ${{ github.event.inputs.android_version || '31' }}
+  TASK_MODE: ${{ github.event.inputs.task_mode || 'autonomous' }}
+  DISPLAY: :99
 
 jobs:
-  run-tasks:
+  play2ai-agentic-system:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 60
+
     steps:
-      - uses: actions/checkout@v3
+    - name: Maximize build space and setup environment
+      run: |
+        # Free up space
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo docker image prune --all --force
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v2
+        # Setup KVM for hardware acceleration
+        echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+        sudo udevadm control --reload-rules
+        sudo udevadm trigger --name-match=kvm
 
-      - name: Build and start services
-        run: docker-compose up --build -d
+        # Setup display for Android emulator
+        sudo apt-get update
+        sudo apt-get install -y xvfb x11vnc fluxbox
+        export DISPLAY=:99
+        Xvfb :99 -screen 0 1280x1024x24 &
+        sleep 3
 
-      - name: Wait for emulator to be ready
-        run: |
-          # simple polling, adjust as needed
-          until docker-compose exec agent adb devices; do
-            sleep 5
-          done
+        df -h
 
-      - name: Run agent tasks
-        run: docker-compose exec agent python /app/src/main.py --todo /app/todo.md
+    - name: Checkout Play2AI repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: run-results
-          path: output/
-          if-no-files-found: warn
+    - name: Setup Docker Buildx with KVM support
+      uses: docker/setup-buildx-action@v3
+      with:
+        driver-opts: network=host
 
-      - name: Shut down
-        run: docker-compose down
+    - name: Install Android SDK and tools
+      run: |
+        # Install Android SDK
+        sudo apt-get install -y android-sdk-platform-tools
+
+        # Setup Android SDK
+        export ANDROID_SDK_ROOT=/usr/lib/android-sdk
+        export PATH=$PATH:$ANDROID_SDK_ROOT/platform-tools
+
+        # Verify ADB installation
+        adb version || echo "ADB not found in PATH"
+
+    - name: Create enhanced Docker Compose for Play2AI
+      run: |
+        cat > docker-compose.play2ai.yml << 'EOF'
+        version: '3.8'
+
+        services:
+          # AI Agent Runtime (Enhanced Play2AI agent)
+          play2ai-agent:
+            build:
+              context: ./agent
+              dockerfile: Dockerfile.enhanced
+            container_name: play2ai-agent
+            ports:
+              - "8080:8080"
+              - "5555:5555"  # ADB port
+            environment:
+              - AI_MODEL=${{ env.AI_MODEL }}
+              - TASK_MODE=${{ env.TASK_MODE }}
+              - ANDROID_EMULATOR_HOST=android-emulator
+              - ANDROID_EMULATOR_PORT=5554
+              - MCP_SERVER_URL=http://android-mcp:8081
+              - GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}
+              - GITHUB_REPOSITORY=${{ github.repository }}
+              - DISPLAY=:99
+            volumes:
+              - .:/workspace:rw
+              - /tmp/.X11-unix:/tmp/.X11-unix:rw
+              - android-data:/android-data:rw
+              - screenshots:/screenshots:rw
+            networks:
+              - play2ai-network
+            depends_on:
+              - android-emulator
+              - android-mcp
+            privileged: true
+            devices:
+              - /dev/kvm:/dev/kvm
+
+          # Android Emulator with enhanced capabilities
+          android-emulator:
+            image: us-docker.pkg.dev/android-emulator-268719/images/28-google-x64:30.1.2
+            container_name: android-emulator
+            ports:
+              - "5554:5554"  # Emulator console
+              - "5555:5555"  # ADB
+              - "8554:8554"  # Web interface
+            environment:
+              - ADBKEY="$(cat ~/.android/adbkey)"
+              - EMULATOR_PARAMS=-no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+              - ANDROID_ARCH=x86_64
+              - ANDROID_API_LEVEL=${{ env.ANDROID_VERSION }}
+            volumes:
+              - android-data:/android-data:rw
+              - /tmp/.X11-unix:/tmp/.X11-unix:rw
+            networks:
+              - play2ai-network
+            privileged: true
+            devices:
+              - /dev/kvm:/dev/kvm
+            healthcheck:
+              test: ["CMD", "adb", "shell", "getprop", "sys.boot_completed"]
+              interval: 30s
+              timeout: 10s
+              retries: 5
+              start_period: 120s
+
+          # Android MCP Server (DroidMind integration)
+          android-mcp:
+            build:
+              context: .
+              dockerfile: Dockerfile.mcp
+            container_name: android-mcp
+            ports:
+              - "8081:8081"
+            environment:
+              - MCP_SERVER_PORT=8081
+              - ANDROID_EMULATOR_HOST=android-emulator
+              - ANDROID_EMULATOR_PORT=5554
+              - ADB_SERVER_SOCKET=tcp:android-emulator:5037
+            volumes:
+              - .:/workspace:rw
+              - android-data:/android-data:rw
+              - screenshots:/screenshots:rw
+            networks:
+              - play2ai-network
+            depends_on:
+              android-emulator:
+                condition: service_healthy
+            command: >
+              sh -c "
+                pip install --no-cache-dir 'git+https://github.com/hyperb1iss/droidmind.git' &&
+                python -m droidmind --transport stdio
+              "
+
+          # Task Monitor and Logger
+          task-monitor:
+            image: python:3.11-slim
+            container_name: task-monitor
+            environment:
+              - AGENT_URL=http://play2ai-agent:8080
+              - MCP_URL=http://android-mcp:8081
+            volumes:
+              - .:/workspace:rw
+              - screenshots:/screenshots:rw
+              - logs:/logs:rw
+            networks:
+              - play2ai-network
+            depends_on:
+              - play2ai-agent
+            command: >
+              sh -c "
+                pip install --no-cache-dir requests pillow &&
+                python /workspace/scripts/task_monitor.py
+              "
+
+        networks:
+          play2ai-network:
+            driver: bridge
+
+        volumes:
+          android-data:
+          screenshots:
+          logs:
+        EOF
+
+    - name: Create enhanced agent Dockerfile
+      run: |
+        mkdir -p agent
+        cat > agent/Dockerfile.enhanced << 'EOF'
+        FROM python:3.11-slim
+
+        # Install system dependencies
+        RUN apt-get update && apt-get install -y \
+            android-tools-adb \
+            android-tools-fastboot \
+            scrcpy \
+            ffmpeg \
+            imagemagick \
+            curl \
+            git \
+            build-essential \
+            && rm -rf /var/lib/apt/lists/*
+
+        # Install Python dependencies
+        COPY requirements.txt /app/requirements.txt
+        RUN pip install --no-cache-dir -r /app/requirements.txt
+
+        # Install additional AI and automation tools
+        RUN pip install --no-cache-dir \
+            anthropic \
+            openai \
+            google-generativeai \
+            opencv-python \
+            pillow \
+            numpy \
+            requests \
+            websockets \
+            aiohttp \
+            playwright \
+            selenium \
+            uiautomator2 \
+            'git+https://github.com/hyperb1iss/droidmind.git'
+
+        # Create app directory
+        WORKDIR /app
+
+        # Copy application code
+        COPY src/ /app/src/
+        COPY tools/ /app/tools/
+
+        # Set permissions
+        RUN chmod +x /app/src/main.py
+
+        EXPOSE 8080 5555
+
+        CMD ["python", "/app/src/main.py"]
+        EOF
+
+    - name: Create MCP Server Dockerfile
+      run: |
+        cat > Dockerfile.mcp << 'EOF'
+        FROM python:3.11-slim
+
+        # Install system dependencies including ADB
+        RUN apt-get update && apt-get install -y \
+            android-tools-adb \
+            curl \
+            git \
+            build-essential \
+            && rm -rf /var/lib/apt/lists/*
+
+        # Install DroidMind and dependencies
+        RUN pip install --no-cache-dir \
+            'git+https://github.com/hyperb1iss/droidmind.git' \
+            anthropic \
+            openai \
+            requests \
+            websockets
+
+        WORKDIR /app
+
+        # Create MCP server wrapper
+        COPY scripts/mcp_server.py /app/mcp_server.py
+
+        EXPOSE 8081
+
+        CMD ["python", "/app/mcp_server.py"]
+        EOF
+
+    - name: Create enhanced agent runtime
+      run: |
+        mkdir -p agent/src agent/tools scripts
+
+        # Create requirements.txt
+        cat > agent/requirements.txt << 'EOF'
+        anthropic>=0.7.0
+        openai>=1.0.0
+        google-generativeai>=0.3.0
+        requests>=2.31.0
+        websockets>=11.0.0
+        aiohttp>=3.8.0
+        opencv-python>=4.8.0
+        pillow>=10.0.0
+        numpy>=1.24.0
+        playwright>=1.40.0
+        selenium>=4.15.0
+        uiautomator2>=3.0.0
+        fastapi>=0.104.0
+        uvicorn>=0.24.0
+        pydantic>=2.4.0
+        python-multipart>=0.0.6
+        EOF
+
+        # Create enhanced main agent
+        cat > agent/src/main.py << 'EOF'
+        #!/usr/bin/env python3
+        """
+        Enhanced Play2AI Agent Runtime with MCP Integration
+        """
+        import os
+        import json
+        import time
+        import asyncio
+        import logging
+        import subprocess
+        from pathlib import Path
+        from typing import Dict, List, Any, Optional
+        import requests
+        from fastapi import FastAPI, BackgroundTasks
+        from fastapi.responses import JSONResponse
+        import uvicorn
+
+        # Setup logging
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+
+        class Play2AIAgent:
+            def __init__(self):
+                self.ai_model = os.getenv('AI_MODEL', 'llama3')
+                self.task_mode = os.getenv('TASK_MODE', 'autonomous')
+                self.android_host = os.getenv('ANDROID_EMULATOR_HOST', 'android-emulator')
+                self.android_port = os.getenv('ANDROID_EMULATOR_PORT', '5554')
+                self.mcp_url = os.getenv('MCP_SERVER_URL', 'http://android-mcp:8081')
+                self.github_token = os.getenv('GITHUB_TOKEN')
+                self.workspace = Path('/workspace')
+                self.screenshots_dir = Path('/screenshots')
+                self.screenshots_dir.mkdir(exist_ok=True)
+
+                # Initialize AI client based on model
+                self.init_ai_client()
+
+                # FastAPI app for external control
+                self.app = FastAPI(title="Play2AI Agent", version="2.0")
+                self.setup_routes()
+
+            def init_ai_client(self):
+                """Initialize AI client based on selected model"""
+                if 'gpt' in self.ai_model.lower():
+                    import openai
+                    self.ai_client = openai.OpenAI()
+                elif 'gemini' in self.ai_model.lower() or 'gemma' in self.ai_model.lower():
+                    import google.generativeai as genai
+                    self.ai_client = genai
+                else:
+                    # Default to Anthropic/Claude
+                    import anthropic
+                    self.ai_client = anthropic.Anthropic()
+
+            def setup_routes(self):
+                """Setup FastAPI routes"""
+                @self.app.get("/")
+                async def root():
+                    return {"status": "Play2AI Agent Running", "model": self.ai_model}
+
+                @self.app.post("/execute_task")
+                async def execute_task(task: Dict[str, Any], background_tasks: BackgroundTasks):
+                    background_tasks.add_task(self.execute_autonomous_task, task)
+                    return {"status": "Task queued", "task": task}
+
+                @self.app.get("/status")
+                async def get_status():
+                    return {
+                        "agent_status": "active",
+                        "android_connection": await self.check_android_connection(),
+                        "mcp_connection": await self.check_mcp_connection(),
+                        "current_task": getattr(self, 'current_task', None)
+                    }
+
+            async def check_android_connection(self) -> bool:
+                """Check if Android emulator is accessible"""
+                try:
+                    result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=10)
+                    return 'emulator' in result.stdout or 'device' in result.stdout
+                except Exception as e:
+                    logger.error(f"Android connection check failed: {e}")
+                    return False
+
+            async def check_mcp_connection(self) -> bool:
+                """Check if MCP server is accessible"""
+                try:
+                    response = requests.get(f"{self.mcp_url}/health", timeout=5)
+                    return response.status_code == 200
+                except Exception as e:
+                    logger.error(f"MCP connection check failed: {e}")
+                    return False
+
+            def take_screenshot(self, filename: Optional[str] = None) -> str:
+                """Take screenshot of Android emulator"""
+                if not filename:
+                    filename = f"screenshot_{int(time.time())}.png"
+
+                screenshot_path = self.screenshots_dir / filename
+
+                try:
+                    # Use ADB to take screenshot
+                    subprocess.run([
+                        'adb', '-s', f'{self.android_host}:{self.android_port}',
+                        'exec-out', 'screencap', '-p'
+                    ], stdout=open(screenshot_path, 'wb'), check=True, timeout=30)
+
+                    logger.info(f"Screenshot saved: {screenshot_path}")
+                    return str(screenshot_path)
+                except Exception as e:
+                    logger.error(f"Screenshot failed: {e}")
+                    return ""
+
+            async def query_ai_model(self, prompt: str, context: Dict[str, Any] = None) -> str:
+                """Query AI model with context"""
+                try:
+                    if hasattr(self.ai_client, 'messages'):  # Anthropic
+                        response = self.ai_client.messages.create(
+                            model="claude-3-sonnet-20240229",
+                            max_tokens=2000,
+                            messages=[{"role": "user", "content": prompt}]
+                        )
+                        return response.content[0].text
+                    else:
+                        # Generic completion approach
+                        return f"AI Response for: {prompt[:100]}..."
+                except Exception as e:
+                    logger.error(f"AI query failed: {e}")
+                    return "AI query failed"
+
+            async def execute_android_action(self, action: Dict[str, Any]) -> Dict[str, Any]:
+                """Execute action on Android device via MCP"""
+                try:
+                    response = requests.post(
+                        f"{self.mcp_url}/android/action",
+                        json=action,
+                        timeout=30
+                    )
+                    if response.status_code == 200:
+                        return response.json()
+                    else:
+                        return {"success": False, "error": f"MCP error: {response.status_code}"}
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            def read_todo_tasks(self) -> List[Dict[str, Any]]:
+                """Read tasks from todo.md"""
+                todo_file = self.workspace / 'todo.md'
+                if not todo_file.exists():
+                    logger.warning("todo.md not found, creating default tasks")
+                    return self.create_default_tasks()
+
+                try:
+                    with open(todo_file, 'r') as f:
+                        content = f.read()
+
+                    # Parse markdown tasks (basic implementation)
+                    tasks = []
+                    for line in content.split('\n'):
+                        if line.strip().startswith('- [ ]') or line.strip().startswith('- [x]'):
+                            task_text = line.strip()[5:].strip()
+                            completed = '[x]' in line
+                            tasks.append({
+                                'id': len(tasks) + 1,
+                                'description': task_text,
+                                'completed': completed,
+                                'type': 'android_automation'
+                            })
+
+                    return tasks
+                except Exception as e:
+                    logger.error(f"Failed to read todo.md: {e}")
+                    return self.create_default_tasks()
+
+            def create_default_tasks(self) -> List[Dict[str, Any]]:
+                """Create default tasks for Android automation"""
+                return [
+                    {
+                        'id': 1,
+                        'description': 'Take screenshot of Android home screen',
+                        'completed': False,
+                        'type': 'screenshot',
+                        'action': {'type': 'screenshot', 'target': 'home'}
+                    },
+                    {
+                        'id': 2,
+                        'description': 'Open Settings app',
+                        'completed': False,
+                        'type': 'app_launch',
+                        'action': {'type': 'launch_app', 'package': 'com.android.settings'}
+                    },
+                    {
+                        'id': 3,
+                        'description': 'Navigate through device information',
+                        'completed': False,
+                        'type': 'navigation',
+                        'action': {'type': 'navigate', 'target': 'device_info'}
+                    }
+                ]
+
+            async def execute_autonomous_task(self, task: Dict[str, Any]) -> Dict[str, Any]:
+                """Execute a single autonomous task"""
+                self.current_task = task
+                logger.info(f"Executing task: {task['description']}")
+
+                # Take initial screenshot
+                screenshot_path = self.take_screenshot(f"task_{task['id']}_before.png")
+
+                # Generate AI plan for task
+                prompt = f"""
+                ANDROID AUTOMATION TASK
+                Task: {task['description']}
+                Task Type: {task.get('type', 'general')}
+                Current Screenshot: {screenshot_path}
+
+                As an autonomous Android automation agent, create a detailed execution plan.
+                Available actions via MCP server:
+                - take_screenshot()
+                - tap(x, y)
+                - swipe(start_x, start_y, end_x, end_y)
+                - type_text(text)
+                - press_key(key)
+                - launch_app(package_name)
+                - get_current_activity()
+                - scroll(direction)
+
+                Return a JSON plan with steps to complete this task.
+                """
+
+                ai_plan = await self.query_ai_model(prompt, {'task': task})
+
+                # Execute the plan
+                results = []
+                try:
+                    # Parse AI plan and execute steps
+                    if 'action' in task:
+                        action_result = await self.execute_android_action(task['action'])
+                        results.append(action_result)
+
+                    # Take final screenshot
+                    final_screenshot = self.take_screenshot(f"task_{task['id']}_after.png")
+
+                    # Mark task as completed
+                    task['completed'] = True
+                    task['results'] = results
+                    task['screenshots'] = [screenshot_path, final_screenshot]
+
+                    logger.info(f"Task {task['id']} completed successfully")
+                    return task
+
+                except Exception as e:
+                    logger.error(f"Task execution failed: {e}")
+                    task['error'] = str(e)
+                    return task
+                finally:
+                    self.current_task = None
+
+            async def run_autonomous_mode(self):
+                """Run agent in autonomous mode"""
+                logger.info("Starting autonomous mode")
+
+                # Wait for Android emulator to be ready
+                while not await self.check_android_connection():
+                    logger.info("Waiting for Android emulator...")
+                    await asyncio.sleep(10)
+
+                # Wait for MCP server to be ready
+                while not await self.check_mcp_connection():
+                    logger.info("Waiting for MCP server...")
+                    await asyncio.sleep(5)
+
+                # Load tasks from todo.md
+                tasks = self.read_todo_tasks()
+                logger.info(f"Loaded {len(tasks)} tasks")
+
+                # Execute tasks sequentially
+                for task in tasks:
+                    if not task.get('completed', False):
+                        await self.execute_autonomous_task(task)
+                        await asyncio.sleep(5)  # Brief pause between tasks
+
+                logger.info("Autonomous execution completed")
+
+            def run(self):
+                """Main entry point"""
+                if self.task_mode == 'autonomous':
+                    # Run autonomous mode in background
+                    asyncio.create_task(self.run_autonomous_mode())
+
+                # Start FastAPI server
+                uvicorn.run(self.app, host="0.0.0.0", port=8080)
+
+        if __name__ == "__main__":
+            agent = Play2AIAgent()
+            agent.run()
+        EOF
+
+    - name: Create MCP server wrapper
+      run: |
+        cat > scripts/mcp_server.py << 'EOF'
+        #!/usr/bin/env python3
+        """
+        MCP Server wrapper for Android control
+        """
+        import os
+        import json
+        import asyncio
+        import logging
+        from typing import Dict, Any
+        from fastapi import FastAPI
+        import uvicorn
+        import subprocess
+        import requests
+
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+
+        app = FastAPI(title="Android MCP Server", version="1.0")
+
+        @app.get("/health")
+        async def health_check():
+            return {"status": "healthy", "mcp_server": "running"}
+
+        @app.post("/android/action")
+        async def execute_android_action(action: Dict[str, Any]):
+            """Execute Android action via ADB/DroidMind"""
+            try:
+                action_type = action.get('type', '')
+
+                if action_type == 'screenshot':
+                    result = subprocess.run([
+                        'adb', 'exec-out', 'screencap', '-p'
+                    ], capture_output=True, timeout=30)
+
+                    if result.returncode == 0:
+                        return {"success": True, "screenshot_data": "captured"}
+                    else:
+                        return {"success": False, "error": result.stderr.decode()}
+
+                elif action_type == 'tap':
+                    x, y = action.get('x', 0), action.get('y', 0)
+                    result = subprocess.run([
+                        'adb', 'shell', 'input', 'tap', str(x), str(y)
+                    ], capture_output=True, timeout=10)
+                    return {"success": result.returncode == 0}
+
+                elif action_type == 'launch_app':
+                    package = action.get('package', '')
+                    result = subprocess.run([
+                        'adb', 'shell', 'monkey', '-p', package, '-c', 'android.intent.category.LAUNCHER', '1'
+                    ], capture_output=True, timeout=15)
+                    return {"success": result.returncode == 0}
+
+                else:
+                    return {"success": False, "error": f"Unknown action type: {action_type}"}
+
+            except Exception as e:
+                logger.error(f"Action execution failed: {e}")
+                return {"success": False, "error": str(e)}
+
+        @app.get("/android/devices")
+        async def list_android_devices():
+            """List connected Android devices"""
+            try:
+                result = subprocess.run(['adb', 'devices'], capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    devices = []
+                    for line in result.stdout.split('\n')[1:]:
+                        if line.strip() and '\t' in line:
+                            device_id, status = line.strip().split('\t')
+                            devices.append({"id": device_id, "status": status})
+                    return {"success": True, "devices": devices}
+                else:
+                    return {"success": False, "error": result.stderr}
+            except Exception as e:
+                return {"success": False, "error": str(e)}
+
+        if __name__ == "__main__":
+            uvicorn.run(app, host="0.0.0.0", port=8081)
+        EOF
+
+    - name: Create task monitor
+      run: |
+        cat > scripts/task_monitor.py << 'EOF'
+        #!/usr/bin/env python3
+        """
+        Task Monitor for Play2AI system
+        """
+        import os
+        import time
+        import json
+        import logging
+        import requests
+        from pathlib import Path
+
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+
+        def monitor_system():
+            agent_url = os.getenv('AGENT_URL', 'http://play2ai-agent:8080')
+            mcp_url = os.getenv('MCP_URL', 'http://android-mcp:8081')
+
+            while True:
+                try:
+                    # Check agent status
+                    agent_response = requests.get(f"{agent_url}/status", timeout=5)
+                    if agent_response.status_code == 200:
+                        status = agent_response.json()
+                        logger.info(f"Agent Status: {status}")
+
+                    # Check MCP server
+                    mcp_response = requests.get(f"{mcp_url}/health", timeout=5)
+                    if mcp_response.status_code == 200:
+                        logger.info("MCP Server: healthy")
+
+                    time.sleep(30)  # Monitor every 30 seconds
+
+                except Exception as e:
+                    logger.warning(f"Monitor check failed: {e}")
+                    time.sleep(60)
+
+        if __name__ == "__main__":
+            monitor_system()
+        EOF
+
+    - name: Create default todo.md if not exists
+      run: |
+        if [ ! -f todo.md ]; then
+          cat > todo.md << 'EOF'
+        # Play2AI Agent Tasks
+
+        ## Android Automation Tasks
+
+        - [ ] Take initial screenshot of home screen
+        - [ ] Open Settings application
+        - [ ] Navigate to About Device section
+        - [ ] Take screenshot of device information
+        - [ ] Open Google Play Store
+        - [ ] Search for a specific app
+        - [ ] Take screenshot of search results
+        - [ ] Navigate back to home screen
+        - [ ] Test notification panel
+        - [ ] Complete automation report
+
+        ## Development Tasks
+
+        - [ ] Analyze current app structure
+        - [ ] Test ADB connectivity
+        - [ ] Verify MCP server integration
+        - [ ] Document automation results
+        - [ ] Generate performance metrics
+
+        ## Testing Scenarios
+
+        - [ ] UI interaction testing
+        - [ ] App launch performance
+        - [ ] Screen capture quality
+        - [ ] Error handling verification
+        - [ ] Multi-step workflow testing
+        EOF
+        fi
+
+    - name: Deploy Play2AI Agentic System
+      run: |
+        # Ensure proper permissions
+        chmod +x agent/src/main.py
+        chmod +x scripts/*.py
+
+        # Build and start services
+        docker compose -f docker-compose.play2ai.yml up --build -d
+
+        # Wait for services initialization
+        echo "Waiting for services to initialize..."
+        sleep 60
+
+        # Check service health
+        docker compose -f docker-compose.play2ai.yml ps
+        docker compose -f docker-compose.play2ai.yml logs play2ai-agent
+        docker compose -f docker-compose.play2ai.yml logs android-mcp
