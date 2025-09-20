@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  agent:
+    build:
+      context: ./agent
+    volumes:
+      - ./output:/app/output
+      # This volume is for the agent to access the emulator's ADB socket
+      # It assumes the emulator service exposes ADB on a standard port or via a shared volume.
+      # For now, we'll assume a local ADB server is running for simplicity in early stages.
+    depends_on:
+      - emulator
+    environment:
+      - ADB_SERVER_SOCKET=/var/run/adb.sock # Example, might need adjustment
+
+  emulator:
+    # --------------------------------------------------------------------------
+    # 🚨 Emulator Configuration Required 🚨
+    # --------------------------------------------------------------------------
+    # You need to choose and configure an Android emulator service.
+    # Waydroid is recommended for performance but requires a specific host setup.
+    #
+    # Example using a pre-built Waydroid image (hypothetical):
+    # image: some/waydroid-image
+    # privileged: true
+    # volumes:
+    #   - /var/run/dbus:/var/run/dbus
+    #   - /dev/ashmem:/dev/ashmem
+    #   - /dev/binder:/dev/binder
+    #   - /dev/dri:/dev/dri # For GPU acceleration
+    # ports:
+    #   - "5555:5555" # ADB port
+    # --------------------------------------------------------------------------
+    image: busybox # Placeholder image
+    command: ["echo", "Emulator service needs to be configured. See comments in docker-compose.yml"]

@@ -1,0 +1,35 @@
+name: '🤖 AI Model Runner'
+
+on:
+  workflow_dispatch: # Allows manual triggering
+  pull_request:
+    paths:
+      - 'todo.md'
+
+jobs:
+  run-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 'Checkout Code'
+        uses: actions/checkout@v4
+
+      - name: 'Set up Docker Buildx'
+        uses: docker/setup-buildx-action@v3
+
+      - name: 'Build and Run Docker Services'
+        run: |
+          # Note: The emulator service is a placeholder.
+          # This workflow will fail until a working emulator is configured.
+          # For now, we can build and run the agent to test its logic.
+          docker-compose build agent
+          # In a real scenario, you'd run 'docker-compose up -d'
+          # and then exec into the agent container to run tasks.
+          # For this example, we'll just run the agent's main script.
+          docker-compose run --rm agent
+
+      - name: 'Upload Results'
+        if: always() # Run even if previous steps fail
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-output
+          path: output/
