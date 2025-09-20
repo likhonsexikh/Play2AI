@@ -60,6 +60,8 @@ def main():
     os.makedirs(screenshots_dir, exist_ok=True)
 
     # Task 1: Install calculator
+    # TODO: The path below is a placeholder.
+    # You need to mount a sample APK into the container and provide the correct path here.
     install_app("/path/to/sample_calculator.apk")  # need to include sample apk
     time.sleep(5)
     # Task 2: Open calculator

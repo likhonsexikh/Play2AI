@@ -1,1 +1,3 @@
 # Python dependencies
+# Add any Python dependencies for the agent here.
+# They will be installed by the Dockerfile during the build process.

@@ -12,19 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-    services:
-      docker:
-        # ensure docker is available
-        name: docker
     steps:
       - uses: actions/checkout@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v2
-
-      - name: Log in to Docker registry (if needed)
-        # uses: docker/login-action@v2
-        # with credentials
 
       - name: Build and start services
         run: docker-compose up --build -d
@@ -32,17 +24,17 @@ jobs:
       - name: Wait for emulator to be ready
         run: |
           # simple polling, adjust as needed
-          until docker exec $(docker ps -qf "name=Play2AI_emulator_1") adb devices; do
+          until docker exec $(docker-compose ps -q emulator) adb devices; do
             sleep 5
           done
 
       - name: Run agent tasks
-        run: docker exec $(docker ps -qf "name=Play2AI_agent_1") python /app/src/main.py --todo /app/todo.md
+        run: docker exec $(docker-compose ps -q agent) python /app/src/main.py --todo /app/todo.md
 
       - name: Collect artifacts
         run: |
-          docker cp $(docker ps -qf "name=Play2AI_agent_1"):/app/logs logs || true
-          docker cp $(docker ps -qf "name=Play2AI_emulator_1"):/data/screenshots screenshots || true
+          docker cp $(docker-compose ps -q agent):/app/logs logs || true
+          docker cp $(docker-compose ps -q emulator):/data/screenshots screenshots || true
         continue-on-error: true
 
       - name: Upload artifacts
