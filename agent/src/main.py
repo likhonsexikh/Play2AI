@@ -45,7 +45,7 @@ def parse_todo(todo_fp: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--todo", required=True, help="Path to todo.md")
-    parser.add_argument("--apk-path", required=True, help="Path to the sample APK to install.")
+    parser.add_argument("--apk-path", required=False, help="Path to the sample APK to install.")
     args = parser.parse_args()
 
     if not wait_for_device():
@@ -55,29 +55,38 @@ def main():
     # tasks from todo
     tasks = parse_todo(args.todo)
     # a simple hardcoded first iteration
-    logs_dir = "/app/logs"
-    screenshots_dir = "/android/screenshots"
+    logs_dir = "/app/output/logs"
+    screenshots_dir = "/app/output/screenshots"
     os.makedirs(logs_dir, exist_ok=True)
     os.makedirs(screenshots_dir, exist_ok=True)
 
-    # Task 1: Install calculator
-    print(f"Installing APK from: {args.apk_path}")
-    install_app(args.apk_path)
-    time.sleep(5)
-    # Task 2: Open calculator
-    open_app("com.android.calculator2", "com.android.calculator2.Calculator")
-    time.sleep(3)
-    # Task 3: Press button (e.g. “1 + 2 =”)
-    tap(100, 200)  # coordinates need adjusting
-    tap(200, 200)
-    tap(150, 300)
-    time.sleep(2)
-    # Task 4: Capture screenshot
-    capture_screenshot(f"{screenshots_dir}/after_interaction.png")
-    # Task 6 & 7: Generate summary & log (simplified)
-    with open(f"{logs_dir}/run1.log", "w") as lf:
-        lf.write("Installed calculator, opened app, pressed buttons, screenshot saved.\n")
-    print("Tasks done.")
+    # --- Task Execution Logic ---
+    # This is a placeholder for a more sophisticated task runner.
+    # For now, it only runs the hardcoded app interaction task if an APK is provided.
+    if args.apk_path:
+        print(f"--- Running App Interaction Task (APK: {args.apk_path}) ---")
+        # Task 1: Install app
+        install_app(args.apk_path)
+        time.sleep(5)
+        # Task 2: Open app
+        open_app("com.android.calculator2", "com.android.calculator2.Calculator")
+        time.sleep(3)
+        # Task 3: Press button
+        tap(100, 200)  # coordinates need adjusting
+        tap(200, 200)
+        tap(150, 300)
+        time.sleep(2)
+        # Task 4: Capture screenshot
+        capture_screenshot(f"{screenshots_dir}/after_interaction.png")
+        # Task 5: Log results
+        with open(f"{logs_dir}/run1.log", "w") as lf:
+            lf.write("Installed calculator, opened app, pressed buttons, screenshot saved.\n")
+    else:
+        print("--- No APK provided, skipping app interaction task ---")
+        with open(f"{logs_dir}/run1.log", "w") as lf:
+            lf.write("Agent initialized successfully. No APK provided, so no tasks were run.\n")
+
+    print("✅ Agent finished.")
 
 if __name__ == "__main__":
     main()

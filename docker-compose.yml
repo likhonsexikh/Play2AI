@@ -11,6 +11,8 @@ services:
       - ANDROID_DISPLAY=:0
     volumes:
       - ./android-data:/data
+    ports:
+      - "5555:5555"
     # If using GPU passthrough or special hardware, add below
     # devices:
     #   - /dev/dri/card0
@@ -21,9 +23,9 @@ services:
       - emulator
     volumes:
       - ./todo.md:/app/todo.md
-      - ./agent_data:/app/data
-      - ./android-data:/android  # if needed to share emulator files
+      - ./output:/app/output
     environment:
+      - ADB_SERVER_SOCKET=tcp:emulator:5555
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - MODEL=your_model_here
     # optional ports if exposing UI/endpoint

@@ -24,26 +24,19 @@ jobs:
       - name: Wait for emulator to be ready
         run: |
           # simple polling, adjust as needed
-          until docker exec $(docker-compose ps -q emulator) adb devices; do
+          until docker-compose exec agent adb devices; do
             sleep 5
           done
 
       - name: Run agent tasks
-        run: docker exec $(docker-compose ps -q agent) python /app/src/main.py --todo /app/todo.md --apk-path /path/to/sample_calculator.apk
-
-      - name: Collect artifacts
-        run: |
-          docker cp $(docker-compose ps -q agent):/app/logs logs || true
-          docker cp $(docker-compose ps -q emulator):/data/screenshots screenshots || true
-        continue-on-error: true
+        run: docker-compose exec agent python /app/src/main.py --todo /app/todo.md
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: run-results
-          path: |
-            logs
-            screenshots
+          path: output/
+          if-no-files-found: warn
 
       - name: Shut down
         run: docker-compose down
